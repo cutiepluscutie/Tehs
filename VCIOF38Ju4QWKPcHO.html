@@ -1,0 +1,216 @@
+<html><head><base href="https://websim.ai/c/earth-evolution-simulation-v5" /><title>Earth Evolution Simulation v5</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.9.1/gsap.min.js"></script>
+<style>
+body {
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+  background: #000;
+  overflow: hidden;
+  font-family: Arial, sans-serif;
+}
+
+#scene-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+#info {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  color: white;
+  font-size: 16px;
+  background: rgba(0,0,0,0.5);
+  padding: 10px;
+  border-radius: 5px;
+}
+
+#restart-btn {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  padding: 10px 20px;
+  font-size: 16px;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  display: none;
+}
+
+#restart-btn:hover {
+  background-color: #45a049;
+}
+</style>
+</head>
+<body>
+<div id="scene-container"></div>
+<div id="info"></div>
+<button id="restart-btn">Restart</button>
+
+<script>
+let scene, camera, renderer, earth, clouds, atmosphere;
+const EARTH_RADIUS = 1;
+const EARTH_AGE = 4.54; // billion years
+const SIMULATION_DURATION = 30000; // 30 seconds in milliseconds
+const SIMULATION_YEARS = 4540000000; // 4.54 billion years (full Earth's history)
+let startTime;
+let isPaused = false;
+
+// Define Earth's appearance for different geological eras
+const earthEras = [
+  { age: 4.5, surfaceMap: 'https://i.imgur.com/jlZXcCe.jpg', cloudOpacity: 0, atmosphereOpacity: 0.05 }, // Hadean Eon (molten Earth)
+  { age: 4.0, surfaceMap: 'https://i.imgur.com/w6GW7Zm.jpg', cloudOpacity: 0.1, atmosphereOpacity: 0.1 }, // Early Archean Eon
+  { age: 3.5, surfaceMap: 'https://i.imgur.com/lY2Xix7.jpg', cloudOpacity: 0.3, atmosphereOpacity: 0.15 }, // Late Archean Eon (first oceans)
+  { age: 2.5, surfaceMap: 'https://i.imgur.com/YNdWDRz.jpg', cloudOpacity: 0.5, atmosphereOpacity: 0.2 }, // Proterozoic Eon (first plants)
+  { age: 0.54, surfaceMap: 'https://i.imgur.com/sEwPzwV.jpg', cloudOpacity: 0.7, atmosphereOpacity: 0.25 }, // Paleozoic Era
+  { age: 0.25, surfaceMap: 'https://i.imgur.com/xAEfWG7.jpg', cloudOpacity: 0.8, atmosphereOpacity: 0.3 }, // Mesozoic Era
+  { age: 0.066, surfaceMap: 'https://i.imgur.com/RuDWEMj.jpg', cloudOpacity: 0.9, atmosphereOpacity: 0.35 }, // Cenozoic Era
+  { age: 0, surfaceMap: 'https://i.imgur.com/yOXEhPw.jpg', cloudOpacity: 1, atmosphereOpacity: 0.4 } // Present day
+];
+
+function init() {
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera.position.z = 2;
+
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.getElementById('scene-container').appendChild(renderer.domElement);
+
+  // Earth
+  const earthGeometry = new THREE.SphereGeometry(EARTH_RADIUS, 64, 64);
+  const earthMaterial = new THREE.MeshPhongMaterial({
+    map: new THREE.TextureLoader().load(earthEras[0].surfaceMap),
+    bumpMap: new THREE.TextureLoader().load('https://i.imgur.com/4iBzTMa.jpg'),
+    bumpScale: 0.05,
+    specularMap: new THREE.TextureLoader().load('https://i.imgur.com/4iBzTMa.jpg'),
+    specular: new THREE.Color('grey'),
+    shininess: 5
+  });
+  earth = new THREE.Mesh(earthGeometry, earthMaterial);
+  scene.add(earth);
+
+  // Clouds
+  const cloudGeometry = new THREE.SphereGeometry(EARTH_RADIUS + 0.01, 64, 64);
+  const cloudMaterial = new THREE.MeshPhongMaterial({
+    map: new THREE.TextureLoader().load('https://i.imgur.com/0CMFXQh.png'),
+    transparent: true,
+    opacity: 0
+  });
+  clouds = new THREE.Mesh(cloudGeometry, cloudMaterial);
+  scene.add(clouds);
+
+  // Atmosphere
+  const atmosphereGeometry = new THREE.SphereGeometry(EARTH_RADIUS + 0.05, 64, 64);
+  const atmosphereMaterial = new THREE.MeshPhongMaterial({
+    color: 0x87CEEB,
+    transparent: true,
+    opacity: 0
+  });
+  atmosphere = new THREE.Mesh(atmosphereGeometry, atmosphereMaterial);
+  scene.add(atmosphere);
+
+  // Lighting
+  const ambientLight = new THREE.AmbientLight(0x404040);
+  scene.add(ambientLight);
+  const pointLight = new THREE.PointLight(0xFFFFFF, 1, 100);
+  pointLight.position.set(5, 3, 5);
+  scene.add(pointLight);
+
+  startTime = parseInt(localStorage.getItem('simulationStartTime')) || Date.now();
+  localStorage.setItem('simulationStartTime', startTime);
+  
+  animate();
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  const currentTime = Date.now();
+  const elapsedTime = currentTime - startTime;
+  const progress = Math.min(elapsedTime / SIMULATION_DURATION, 1);
+  const currentAge = EARTH_AGE - (SIMULATION_YEARS / 1e9) * (1 - progress);
+
+  updateEarthAppearance(currentAge);
+  updateInfoDisplay(currentAge);
+
+  earth.rotation.y += 0.002;
+  clouds.rotation.y += 0.003;
+  atmosphere.rotation.y += 0.001;
+
+  if (progress >= 1 && !isPaused) {
+    isPaused = true;
+    document.getElementById('restart-btn').style.display = 'block';
+  }
+
+  renderer.render(scene, camera);
+}
+
+function updateEarthAppearance(age) {
+  let currentEra = earthEras[0];
+  let nextEra = earthEras[1];
+
+  for (let i = 1; i < earthEras.length; i++) {
+    if (age > earthEras[i].age) {
+      currentEra = earthEras[i-1];
+      nextEra = earthEras[i];
+      break;
+    }
+  }
+
+  const t = (age - nextEra.age) / (currentEra.age - nextEra.age);
+  
+  // Transition between surface maps
+  gsap.to(earth.material, {
+    duration: 0.5,
+    onUpdate: () => {
+      earth.material.map = new THREE.TextureLoader().load(nextEra.surfaceMap);
+      earth.material.needsUpdate = true;
+    }
+  });
+  
+  clouds.material.opacity = currentEra.cloudOpacity * (1-t) + nextEra.cloudOpacity * t;
+  atmosphere.material.opacity = currentEra.atmosphereOpacity * (1-t) + nextEra.atmosphereOpacity * t;
+}
+
+function updateInfoDisplay(age) {
+  const infoElement = document.getElementById('info');
+  const formattedAge = age.toFixed(3);
+  const currentYear = Math.floor(2023 - (EARTH_AGE - age) * 1e9);
+  let era = "Present Day";
+  
+  if (age > 4.0) era = "Hadean Eon";
+  else if (age > 2.5) era = "Archean Eon";
+  else if (age > 0.54) era = "Proterozoic Eon";
+  else if (age > 0.25) era = "Paleozoic Era";
+  else if (age > 0.066) era = "Mesozoic Era";
+  else if (age > 0) era = "Cenozoic Era";
+
+  infoElement.textContent = `Earth's Age: ${formattedAge} billion years | Year: ${currentYear} | Era: ${era}`;
+}
+
+function restartSimulation() {
+  startTime = Date.now();
+  localStorage.setItem('simulationStartTime', startTime);
+  isPaused = false;
+  document.getElementById('restart-btn').style.display = 'none';
+}
+
+init();
+
+document.getElementById('restart-btn').addEventListener('click', restartSimulation);
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body></html>
